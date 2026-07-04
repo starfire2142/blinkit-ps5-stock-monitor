@@ -4,15 +4,17 @@ import time
 import random
 from datetime import datetime
 
+from curl_cffi import requests as cffi_requests
 import requests
 
 import config
 import notifier
 
 
-def check_stock_for_pincode(session: requests.Session, pincode: str) -> dict:
+def check_stock_for_pincode(session: cffi_requests.Session, pincode: str) -> dict:
     """Check product stock for a given pincode via Blinkit's internal API.
-    Returns a dict with keys: pincode, in_stock, inventory, merchant_id, error
+    Uses curl_cffi to impersonate Chrome TLS fingerprint (bypasses Cloudflare).
+    Returns a dict with keys: pincode, in_stock, inventory, error
     """
     coords = config.PINCODE_COORDS.get(pincode)
     if not coords:
@@ -47,7 +49,6 @@ def check_stock_for_pincode(session: requests.Session, pincode: str) -> dict:
 
         snippets = data.get("response", {}).get("snippets", [])
 
-        # The product stepper snippet (index 3) has inventory and is_sold_out
         inventory = 0
         is_sold_out = True
 
@@ -79,10 +80,8 @@ def check_stock_for_pincode(session: requests.Session, pincode: str) -> dict:
             "error": None,
         }
 
-    except requests.RequestException as e:
+    except Exception as e:
         return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": str(e)}
-    except (KeyError, ValueError, TypeError) as e:
-        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"Parse error: {e}"}
 
 
 def run_stock_check():
@@ -93,7 +92,7 @@ def run_stock_check():
     print(f"Pincodes: {', '.join(config.PINCODES)}")
     print(f"{'='*60}\n")
 
-    session = requests.Session()
+    session = cffi_requests.Session(impersonate="chrome")
     available_pincodes = []
     failed_pincodes = []
 
@@ -110,7 +109,6 @@ def run_stock_check():
         else:
             print(f"  [{pincode}] Out of stock (inventory: {result['inventory']})")
 
-        # Small delay between requests to avoid rate limiting
         time.sleep(random.uniform(0.5, 1.5))
 
     # Send notifications
