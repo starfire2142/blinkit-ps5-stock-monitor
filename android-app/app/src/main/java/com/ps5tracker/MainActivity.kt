@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
@@ -40,6 +42,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var avgIntervalText: TextView
     private lateinit var pincodeStatsText: TextView
     private lateinit var recentLogText: TextView
+
+    private val refreshHandler = Handler(Looper.getMainLooper())
+    private val refreshRunnable = object : Runnable {
+        override fun run() {
+            updateStatus()
+            refreshAnalytics()
+            refreshHandler.postDelayed(this, 30_000L)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +98,12 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateStatus()
         refreshAnalytics()
+        refreshHandler.postDelayed(refreshRunnable, 30_000L)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        refreshHandler.removeCallbacks(refreshRunnable)
     }
 
     private fun saveCredentials() {
