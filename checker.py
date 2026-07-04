@@ -33,22 +33,28 @@ def check_stock_for_pincode(browser, pincode: str) -> dict:
 
         page = context.new_page()
 
-        # Inject lat/lon into all Blinkit API requests made by the page
+        # Inject lat/lon into ALL Blinkit requests so the server knows our location
         def handle_route(route):
             headers = route.request.headers.copy()
             headers["lat"] = coords["lat"]
             headers["lon"] = coords["lon"]
+            headers["app_client"] = "consumer_web"
             route.continue_(headers=headers)
 
-        page.route("**/v1/**", handle_route)
-        page.route("**/v2/**", handle_route)
+        page.route("**/*blinkit*/**", handle_route)
+        page.route("https://blinkit.com/**", handle_route)
 
-        # First visit homepage to establish session/cookies
-        page.goto("https://blinkit.com", wait_until="domcontentloaded", timeout=30000)
-        time.sleep(2)
+        # Set location cookies before navigating
+        context.add_cookies([
+            {"name": "gr_1_lat", "value": coords["lat"], "domain": ".blinkit.com", "path": "/"},
+            {"name": "gr_1_lon", "value": coords["lon"], "domain": ".blinkit.com", "path": "/"},
+            {"name": "lat", "value": coords["lat"], "domain": ".blinkit.com", "path": "/"},
+            {"name": "lon", "value": coords["lon"], "domain": ".blinkit.com", "path": "/"},
+            {"name": "city", "value": "Pune", "domain": ".blinkit.com", "path": "/"},
+        ])
 
-        # Now navigate to the product page
-        page.goto(config.PRODUCT_URL, wait_until="networkidle", timeout=30000)
+        # Navigate directly to product page
+        page.goto(config.PRODUCT_URL, wait_until="networkidle", timeout=45000)
         time.sleep(3)
 
         # Log page info for debugging
