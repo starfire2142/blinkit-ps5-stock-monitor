@@ -1,11 +1,13 @@
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 
 import config
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 COOLDOWN_FILE = os.environ.get(
     "COOLDOWN_FILE",
@@ -59,7 +61,7 @@ def send_stock_alert(available_pincodes: list[str]) -> bool:
         return False
 
     pincode_list = ", ".join(pincodes_to_notify)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")
+    timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
 
     message = (
         f"🎮 *PS5 IN STOCK!*\n\n"
@@ -77,7 +79,7 @@ def send_stock_alert(available_pincodes: list[str]) -> bool:
 
 def send_error_alert(error_message: str) -> None:
     """Send a Telegram alert when the checker encounters persistent errors."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")
+    timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
     message = (
         f"⚠️ *Blinkit Stock Checker Error*\n\n"
         f"*Error:* {error_message}\n"
