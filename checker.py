@@ -144,6 +144,7 @@ def run_stock_check():
 
     available_pincodes = []
     failed_pincodes = []
+    failed_errors = []
 
     for pincode in config.PINCODES:
         pincode = pincode.strip()
@@ -152,6 +153,7 @@ def run_stock_check():
         if result["error"]:
             print(f"  [{pincode}] ERROR: {result['error']}")
             failed_pincodes.append(pincode)
+            failed_errors.append(result["error"])
         elif result["in_stock"]:
             print(f"  [{pincode}] IN STOCK! (inventory: {result['inventory']})")
             available_pincodes.append(pincode)
@@ -167,7 +169,8 @@ def run_stock_check():
         print(f"\nNo stock found in any pincode.")
 
     if len(failed_pincodes) == len(config.PINCODES):
-        error_msg = "All pincode checks failed. Blinkit API may be blocking requests or has changed."
+        errors = "; ".join(f"{p}: {e}" for p, e in zip(failed_pincodes, failed_errors))
+        error_msg = f"All pincode checks failed.\n\nDetails: {errors}"
         print(f"\nERROR: {error_msg}")
         notifier.send_error_alert(error_msg)
 
