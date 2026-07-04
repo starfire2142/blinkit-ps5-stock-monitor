@@ -16,9 +16,25 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Monitors Blinkit for PS5 availability\nPincodes: 411040, 411045, 411060"
+        android:text="Monitors Blinkit for PS5 availability"
         android:textSize="14sp"
         android:layout_marginBottom="24dp" />
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Pincodes (comma-separated)"
+        android:layout_marginBottom="12dp">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/pincodesInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:text="411040,411045,411060"
+            android:singleLine="true" />
+
+    </com.google.android.material.textfield.TextInputLayout>
 
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"

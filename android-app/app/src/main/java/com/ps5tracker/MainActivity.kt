@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var botTokenInput: EditText
     private lateinit var chatIdInput: EditText
+    private lateinit var pincodesInput: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +40,7 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         botTokenInput = findViewById(R.id.botTokenInput)
         chatIdInput = findViewById(R.id.chatIdInput)
+        pincodesInput = findViewById(R.id.pincodesInput)
 
         val saveButton: Button = findViewById(R.id.saveButton)
         val checkNowButton: Button = findViewById(R.id.checkNowButton)
@@ -47,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("ps5tracker", Context.MODE_PRIVATE)
         botTokenInput.setText(prefs.getString("bot_token", ""))
         chatIdInput.setText(prefs.getString("chat_id", ""))
+        pincodesInput.setText(prefs.getString("pincodes", "411040,411045,411060"))
 
         saveButton.setOnClickListener {
             saveCredentials()
@@ -72,6 +75,7 @@ class MainActivity : AppCompatActivity() {
         prefs.edit()
             .putString("bot_token", botTokenInput.text.toString().trim())
             .putString("chat_id", chatIdInput.text.toString().trim())
+            .putString("pincodes", pincodesInput.text.toString().trim())
             .apply()
         Toast.makeText(this, "Credentials saved! Monitoring started.", Toast.LENGTH_SHORT).show()
         schedulePeriodicWork()
@@ -79,8 +83,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun runImmediateCheck() {
         statusText.text = "Checking now..."
+        val pincodes = pincodesInput.text.toString().trim()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
         Thread {
-            val results = StockChecker.checkAllPincodes()
+            val results = StockChecker.checkPincodes(pincodes)
             val status = results.joinToString("\n") { result ->
                 when {
                     result.error != null -> "${result.pincode}: ERROR - ${result.error}"

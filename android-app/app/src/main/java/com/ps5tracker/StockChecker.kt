@@ -4,6 +4,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -13,7 +14,7 @@ object StockChecker {
     private const val API_URL = "https://blinkit.com/v1/layout/product/763266"
     private const val PRODUCT_NAME = "PlayStation 5 Gaming Console Standard Edition E Chassis (White)"
 
-    private val PINCODES = mapOf(
+    private val KNOWN_COORDS = mutableMapOf(
         "411040" to Pair("18.5992", "73.927"),
         "411045" to Pair("18.5599", "73.7793"),
         "411060" to Pair("18.4765", "73.9098")
@@ -31,9 +32,42 @@ object StockChecker {
         val error: String? = null
     )
 
-    fun checkAllPincodes(): List<StockResult> {
-        return PINCODES.map { (pincode, coords) ->
-            checkPincode(pincode, coords.first, coords.second)
+    fun checkPincodes(pincodes: List<String>): List<StockResult> {
+        return pincodes.map { pincode ->
+            val coords = getCoordinates(pincode)
+            if (coords != null) {
+                checkPincode(pincode, coords.first, coords.second)
+            } else {
+                StockResult(pincode, false, 0, "Could not geocode pincode")
+            }
+        }
+    }
+
+    private fun getCoordinates(pincode: String): Pair<String, String>? {
+        KNOWN_COORDS[pincode]?.let { return it }
+
+        return try {
+            val url = "https://nominatim.openstreetmap.org/search?postalcode=$pincode&country=India&format=json&limit=1"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "PS5StockTracker/1.0")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: return null
+            val results = JSONArray(body)
+            if (results.length() > 0) {
+                val result = results.getJSONObject(0)
+                val lat = result.getString("lat")
+                val lon = result.getString("lon")
+                KNOWN_COORDS[pincode] = Pair(lat, lon)
+                Pair(lat, lon)
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 

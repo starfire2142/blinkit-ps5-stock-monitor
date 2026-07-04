@@ -18,15 +18,22 @@ class StockCheckWorker(
         val prefs = applicationContext.getSharedPreferences("ps5tracker", Context.MODE_PRIVATE)
         val botToken = prefs.getString("bot_token", "") ?: ""
         val chatId = prefs.getString("chat_id", "") ?: ""
+        val pincodesStr = prefs.getString("pincodes", "411040,411045,411060") ?: "411040,411045,411060"
 
         if (botToken.isEmpty() || chatId.isEmpty()) {
             Log.w(TAG, "Telegram credentials not configured")
             return Result.success()
         }
 
-        Log.i(TAG, "Starting stock check...")
+        val pincodes = pincodesStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (pincodes.isEmpty()) {
+            Log.w(TAG, "No pincodes configured")
+            return Result.success()
+        }
 
-        val results = StockChecker.checkAllPincodes()
+        Log.i(TAG, "Starting stock check for pincodes: ${pincodes.joinToString()}")
+
+        val results = StockChecker.checkPincodes(pincodes)
         val availablePincodes = results.filter { it.inStock }.map { it.pincode }
 
         results.forEach { result ->
