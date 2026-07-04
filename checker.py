@@ -43,8 +43,19 @@ def check_stock_for_pincode(browser, pincode: str) -> dict:
         page.route("**/v1/**", handle_route)
         page.route("**/v2/**", handle_route)
 
-        page.goto(config.PRODUCT_URL, wait_until="networkidle", timeout=30000)
+        # First visit homepage to establish session/cookies
+        page.goto("https://blinkit.com", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
+
+        # Now navigate to the product page
+        page.goto(config.PRODUCT_URL, wait_until="networkidle", timeout=30000)
+        time.sleep(3)
+
+        # Log page info for debugging
+        title = page.title()
+        current_url = page.url
+        print(f"    Page title: {title[:60]}")
+        print(f"    URL: {current_url}")
 
         content = page.content().lower()
 
@@ -60,12 +71,13 @@ def check_stock_for_pincode(browser, pincode: str) -> dict:
         if not is_out_of_stock:
             is_in_stock = any(indicator in content for indicator in in_stock_indicators)
 
-        # Also try to check via intercepted API response
-        # The page title confirms we're on the right product
+        # Verify we're on the correct product page
         title = page.title()
-        if "playstation" not in title.lower() and "ps5" not in title.lower():
+        if "blinkit" not in title.lower() and "playstation" not in title.lower() and "ps5" not in title.lower():
+            # Might be a Cloudflare challenge or error page
+            snippet = content[:200]
             context.close()
-            return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": "Wrong page loaded"}
+            return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"Unexpected page: {title[:50]}"}
 
         context.close()
 
