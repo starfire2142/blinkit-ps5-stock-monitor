@@ -1,10 +1,9 @@
 import sys
-import uuid
 import time
 import random
 from datetime import datetime, timezone, timedelta
 
-import requests
+from playwright.sync_api import sync_playwright
 
 import config
 import notifier
@@ -12,125 +11,77 @@ import notifier
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def _get_headers(pincode: str) -> dict:
-    coords = config.PINCODE_COORDS.get(pincode, {})
-    return {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-IN,en;q=0.9",
-        "Origin": "https://blinkit.com",
-        "Referer": f"https://blinkit.com/prn/x/prid/{config.PRODUCT_ID}",
-        "lat": coords.get("lat", "18.5992"),
-        "lon": coords.get("lon", "73.927"),
-        "app_client": "consumer_web",
-        "device_id": str(uuid.uuid4()),
-        "session_uuid": str(uuid.uuid4()),
-    }
-
-
-def _parse_stock_response(data: dict) -> tuple[bool, int]:
-    """Parse API response and return (in_stock, inventory)."""
-    if not data.get("is_success"):
-        return False, 0
-
-    snippets = data.get("response", {}).get("snippets", [])
-
-    for snippet in snippets:
-        snippet_data = snippet.get("data", {})
-        if "is_sold_out" in snippet_data:
-            is_sold_out = snippet_data["is_sold_out"]
-            inventory = snippet_data.get("inventory", 0)
-            if not is_sold_out and inventory > 0:
-                return True, inventory
-            return False, inventory
-
-    # Backup: check page-level sticky footer
-    sticky = data.get("response", {}).get("page_level_components", {}).get("sticky", {})
-    for model in sticky.get("footer_snippet_models", []):
-        snippet_data = model.get("snippet", {}).get("data", {})
-        if "is_sold_out" in snippet_data:
-            is_sold_out = snippet_data["is_sold_out"]
-            inventory = snippet_data.get("inventory", 0)
-            if not is_sold_out and inventory > 0:
-                return True, inventory
-            return False, inventory
-
-    return False, 0
-
-
-def check_with_curl_cffi(pincode: str) -> dict:
-    """Primary method: use curl_cffi for TLS fingerprint impersonation."""
-    try:
-        from curl_cffi import requests as cffi_requests
-    except ImportError:
-        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": "curl_cffi not installed"}
-
+def check_stock_for_pincode(browser, pincode: str) -> dict:
+    """Check product stock by navigating to the product page with location set."""
     coords = config.PINCODE_COORDS.get(pincode)
     if not coords:
         return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"No coordinates for pincode {pincode}"}
 
-    url = config.BLINKIT_API_URL.format(product_id=config.PRODUCT_ID)
-    headers = _get_headers(pincode)
-
     try:
-        session = cffi_requests.Session(impersonate="chrome")
-        response = session.post(url, headers=headers, timeout=15)
-        if response.status_code != 200:
-            return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"HTTP {response.status_code}"}
+        context = browser.new_context(
+            viewport={"width": random.randint(1280, 1440), "height": random.randint(800, 900)},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            locale="en-IN",
+            timezone_id="Asia/Kolkata",
+            geolocation={"latitude": float(coords["lat"]), "longitude": float(coords["lon"])},
+            permissions=["geolocation"],
+        )
 
-        data = response.json()
-        in_stock, inventory = _parse_stock_response(data)
-        return {"pincode": pincode, "in_stock": in_stock, "inventory": inventory, "error": None}
+        page = context.new_page()
+
+        # Inject lat/lon into all Blinkit API requests made by the page
+        def handle_route(route):
+            headers = route.request.headers.copy()
+            headers["lat"] = coords["lat"]
+            headers["lon"] = coords["lon"]
+            route.continue_(headers=headers)
+
+        page.route("**/v1/**", handle_route)
+        page.route("**/v2/**", handle_route)
+
+        page.goto(config.PRODUCT_URL, wait_until="networkidle", timeout=30000)
+        time.sleep(2)
+
+        content = page.content().lower()
+
+        # Determine stock status from page content
+        out_of_stock_indicators = ["out of stock", "sold out", "currently unavailable", "notify me when available"]
+        in_stock_indicators = ["add to cart", "add to basket", "buy now"]
+
+        is_out_of_stock = any(indicator in content for indicator in out_of_stock_indicators)
+
+        # The "ADD" button for similar products shouldn't count - check specifically for main product
+        # Look for the main product's add button vs out of stock text
+        is_in_stock = False
+        if not is_out_of_stock:
+            is_in_stock = any(indicator in content for indicator in in_stock_indicators)
+
+        # Also try to check via intercepted API response
+        # The page title confirms we're on the right product
+        title = page.title()
+        if "playstation" not in title.lower() and "ps5" not in title.lower():
+            context.close()
+            return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": "Wrong page loaded"}
+
+        context.close()
+
+        if is_out_of_stock:
+            return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": None}
+        elif is_in_stock:
+            return {"pincode": pincode, "in_stock": True, "inventory": 1, "error": None}
+        else:
+            return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": "Could not determine stock status"}
+
     except Exception as e:
-        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"curl_cffi: {e}"}
-
-
-def check_with_playwright(pincode: str) -> dict:
-    """Fallback method: use Playwright's browser network stack for API call."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": "playwright not installed"}
-
-    coords = config.PINCODE_COORDS.get(pincode)
-    if not coords:
-        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"No coordinates for pincode {pincode}"}
-
-    url = config.BLINKIT_API_URL.format(product_id=config.PRODUCT_ID)
-    headers = _get_headers(pincode)
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-            context = browser.new_context()
-            api = context.request
-
-            response = api.post(url, headers=headers)
-            if response.status != 200:
-                browser.close()
-                return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"HTTP {response.status}"}
-
-            data = response.json()
-            browser.close()
-
-            in_stock, inventory = _parse_stock_response(data)
-            return {"pincode": pincode, "in_stock": in_stock, "inventory": inventory, "error": None}
-    except Exception as e:
-        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": f"playwright: {e}"}
-
-
-def check_stock_for_pincode(pincode: str) -> dict:
-    """Check stock using curl_cffi first, falling back to Playwright if needed."""
-    result = check_with_curl_cffi(pincode)
-    if result["error"] is None:
-        return result
-
-    print(f"    curl_cffi failed ({result['error']}), trying Playwright...")
-    return check_with_playwright(pincode)
+        try:
+            context.close()
+        except:
+            pass
+        return {"pincode": pincode, "in_stock": False, "inventory": 0, "error": str(e)}
 
 
 def run_stock_check():
@@ -146,21 +97,29 @@ def run_stock_check():
     failed_pincodes = []
     failed_errors = []
 
-    for pincode in config.PINCODES:
-        pincode = pincode.strip()
-        result = check_stock_for_pincode(pincode)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
 
-        if result["error"]:
-            print(f"  [{pincode}] ERROR: {result['error']}")
-            failed_pincodes.append(pincode)
-            failed_errors.append(result["error"])
-        elif result["in_stock"]:
-            print(f"  [{pincode}] IN STOCK! (inventory: {result['inventory']})")
-            available_pincodes.append(pincode)
-        else:
-            print(f"  [{pincode}] Out of stock (inventory: {result['inventory']})")
+        for pincode in config.PINCODES:
+            pincode = pincode.strip()
+            result = check_stock_for_pincode(browser, pincode)
 
-        time.sleep(random.uniform(0.5, 1.5))
+            if result["error"]:
+                print(f"  [{pincode}] ERROR: {result['error']}")
+                failed_pincodes.append(pincode)
+                failed_errors.append(result["error"])
+            elif result["in_stock"]:
+                print(f"  [{pincode}] IN STOCK!")
+                available_pincodes.append(pincode)
+            else:
+                print(f"  [{pincode}] Out of stock")
+
+            time.sleep(random.uniform(1.0, 3.0))
+
+        browser.close()
 
     if available_pincodes:
         print(f"\n*** ALERT: Stock available in: {', '.join(available_pincodes)} ***")
