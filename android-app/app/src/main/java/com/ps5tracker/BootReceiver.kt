@@ -3,6 +3,7 @@ package com.ps5tracker
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -26,6 +27,18 @@ class BootReceiver : BroadcastReceiver() {
                 ExistingPeriodicWorkPolicy.KEEP,
                 workRequest
             )
+
+            val prefs = context.getSharedPreferences("ps5tracker", Context.MODE_PRIVATE)
+            val botToken = prefs.getString("bot_token", "") ?: ""
+            val chatId = prefs.getString("chat_id", "") ?: ""
+            if (botToken.isNotEmpty() && chatId.isNotEmpty()) {
+                val serviceIntent = Intent(context, TelegramCommandService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            }
         }
     }
 }

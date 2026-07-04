@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity() {
         requestPermissions()
         disableBatteryOptimization()
         schedulePeriodicWork()
+        startTelegramCommandService()
         updateStatus()
         refreshAnalytics()
     }
@@ -97,6 +98,7 @@ class MainActivity : AppCompatActivity() {
             .apply()
         Toast.makeText(this, "Credentials saved! Monitoring started.", Toast.LENGTH_SHORT).show()
         schedulePeriodicWork()
+        startTelegramCommandService()
     }
 
     private fun runImmediateCheck() {
@@ -180,6 +182,20 @@ class MainActivity : AppCompatActivity() {
             recentLogText.text = sb.toString().trimEnd()
         } else {
             recentLogText.text = "No checks recorded yet"
+        }
+    }
+
+    private fun startTelegramCommandService() {
+        val prefs = getSharedPreferences("ps5tracker", Context.MODE_PRIVATE)
+        val botToken = prefs.getString("bot_token", "") ?: ""
+        val chatId = prefs.getString("chat_id", "") ?: ""
+        if (botToken.isEmpty() || chatId.isEmpty()) return
+
+        val intent = Intent(this, TelegramCommandService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
     }
 
