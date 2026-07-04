@@ -34,6 +34,9 @@ class StockCheckWorker(
         Log.i(TAG, "Starting stock check for pincodes: ${pincodes.joinToString()}")
 
         val results = StockChecker.checkPincodes(pincodes)
+
+        CheckLog.addEntries(applicationContext, results)
+
         val availablePincodes = results.filter { it.inStock }.map { it.pincode }
 
         results.forEach { result ->
@@ -47,12 +50,9 @@ class StockCheckWorker(
         if (availablePincodes.isNotEmpty()) {
             Log.i(TAG, "ALERT: Stock available in ${availablePincodes.joinToString()}")
             StockChecker.sendTelegramAlert(botToken, chatId, availablePincodes)
-
-            // Save last alert time
             prefs.edit().putLong("last_alert_time", System.currentTimeMillis()).apply()
         }
 
-        // Save last check time
         prefs.edit()
             .putLong("last_check_time", System.currentTimeMillis())
             .putString("last_check_status", results.joinToString("\n") { "${it.pincode}: ${if (it.inStock) "IN STOCK" else it.error ?: "Out of stock"}" })
