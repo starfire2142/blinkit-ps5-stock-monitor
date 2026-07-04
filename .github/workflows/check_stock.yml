@@ -16,13 +16,12 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install curl_cffi requests playwright
-
-      - name: Install Playwright browsers
-        run: playwright install chromium --with-deps
+        run: pip install requests pysocks
 
       - name: Run stock checker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+          USE_AUTO_PROXY: "true"
         run: python checker.py
