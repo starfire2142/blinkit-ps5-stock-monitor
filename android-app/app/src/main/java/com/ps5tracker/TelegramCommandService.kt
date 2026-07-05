@@ -1,8 +1,10 @@
 package com.ps5tracker
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -10,6 +12,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,6 +33,7 @@ class TelegramCommandService : Service() {
         private const val CHANNEL_ID = "telegram_cmd_channel"
         private const val NOTIFICATION_ID = 2001
         private const val POLL_INTERVAL_MS = 30_000L
+        private const val RESTART_ALARM_REQUEST = 3001
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -38,6 +43,7 @@ class TelegramCommandService : Service() {
         .build()
 
     private var isRunning = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -50,13 +56,16 @@ class TelegramCommandService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification()
         startForeground(NOTIFICATION_ID, notification)
         isRunning = true
+        handler.removeCallbacks(pollRunnable)
         handler.post(pollRunnable)
+        scheduleRestartAlarm()
         Log.i(TAG, "Telegram command polling started")
         return START_STICKY
     }
@@ -64,11 +73,64 @@ class TelegramCommandService : Service() {
     override fun onDestroy() {
         isRunning = false
         handler.removeCallbacks(pollRunnable)
-        Log.i(TAG, "Telegram command polling stopped")
+        releaseWakeLock()
+        scheduleImmediateRestart()
+        Log.i(TAG, "Telegram command polling stopped - scheduling restart")
         super.onDestroy()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        scheduleImmediateRestart()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun acquireWakeLock() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "ps5tracker:TelegramPollWakeLock"
+        ).apply {
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+    }
+
+    private fun scheduleRestartAlarm() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, ServiceRestartReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, RESTART_ALARM_REQUEST, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.setRepeating(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + 5 * 60 * 1000,
+            5 * 60 * 1000,
+            pendingIntent
+        )
+    }
+
+    private fun scheduleImmediateRestart() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, ServiceRestartReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, RESTART_ALARM_REQUEST + 1, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.set(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + 5000,
+            pendingIntent
+        )
+    }
 
     private fun pollUpdates() {
         val prefs = getSharedPreferences("ps5tracker", Context.MODE_PRIVATE)
@@ -306,10 +368,11 @@ class TelegramCommandService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Telegram Commands",
+                "PS5 Stock Monitor",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Listens for Telegram bot commands"
+                description = "Keeps stock monitoring active"
+                setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -318,10 +381,12 @@ class TelegramCommandService : Service() {
 
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("PS5 Tracker")
-            .setContentText("Listening for Telegram commands")
+            .setContentTitle("PS5 Tracker Active")
+            .setContentText("Monitoring stock & listening for commands")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 }
